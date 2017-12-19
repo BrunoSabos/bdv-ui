@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>BdvUi</title>
+  <base href="/">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script type="application/javascript" src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
+</head>
+<body>
+<app-root></app-root>
+<br/>
+<div id="graph-container"></div>
+<div class="graph-overlay"></div>
+<script type="application/javascript">
+  var colors = [
+    0x1f77b4ff, 0xaec7e8ff,
+    0xff7f0eff, 0xffbb78ff,
+    0x2ca02cff, 0x98df8aff,
+    0xd62728ff, 0xff9896ff,
+    0x9467bdff, 0xc5b0d5ff,
+    0x8c564bff, 0xc49c94ff,
+    0xe377c2ff, 0xf7b6d2ff,
+    0x7f7f7fff, 0xc7c7c7ff,
+    0xbcbd22ff, 0xdbdb8dff,
+    0x17becfff, 0x9edae5ff
+  ];
+
+  function showGraph1() {
+    var graph = Viva.Graph.graph();
+
+    $.getJSON("https://localhost:9443/", function(data) {
+      data.nodes.forEach(function(n) {
+        graph.addNode(n.name, n);
+      });
+
+      data.links.forEach(function(l) {
+        graph.addLink(l.from, l.to);
+      });
+    });
+
+    // graph.addNode('project', {label:'project', name:'project'});
+
+    var layout = Viva.Graph.Layout.forceDirected(graph
+      ,{
+        springLength: 30,
+        springCoeff: 0.0008,
+        gravity: -1.2,
+        theta: 0.8,
+        dragCoeff: 0.02,
+        timeStep: 20
+      }
+    );
+
+    // var graphics = Viva.Graph.View.webglGraphics();
+    var graphics = Viva.Graph.View.svgGraphics();
+
+    var labelWidth = 100;
+    var labelHeight = 25;
+
+    graphics
+      .node(function (node){
+      //   console.log(node.data.url);
+      //   return Viva.Graph.View.webglImage(32, node.data.url);
+      //   return Viva.Graph.svg('image')
+      //     .attr('width', 24)
+      //     .attr('height', 24)
+      //     .link(node.data.label == 'person' ? 'http://localhost:4200/assets/people.png' : 'http://localhost:4200/assets/project.png');
+        if(node.data.label === 'person') {
+          return Viva.Graph.svg('image')
+            .attr('label', 'person')
+            .attr('width', 24)
+            .attr('height', 24)
+            .link('http://localhost:4200/assets/people.png');
+        } else {
+          // https://github.com/anvaka/VivaGraphJS/blob/master/demos/tutorial_svg/06%20-%20Composite%20Nodes.html
+          // https://github.com/anvaka/VivaGraphJS/blob/master/demos/other/webglCustomNode.html
+
+          // return Viva.Graph.svg('image')
+          //   .attr('width', 24)
+          //   .attr('height', 24)
+          //   .link('http://localhost:4200/assets/project.png');
+          var ui = Viva.Graph.svg('g')
+            .attr('x', 0)
+            .attr('y', 0)
+            .attr('label', 'project')
+            .attr('width', labelWidth)
+            .attr('height', labelHeight);
+
+          var n = Viva.Graph.svg('rect')
+            .attr('width', labelWidth)
+            .attr('height', labelHeight)
+            .attr('fill', '#456789');
+
+          // console.log(node.data.name);
+          var svgText = Viva.Graph.svg('text')//.attr('y', '-4px')
+            // .attr('stroke', 'black')
+            // .attr('width', labelWidth)
+            // .attr('height', labelHeight)
+            .attr('x', labelWidth/2)
+            .attr('y', labelHeight/2)
+            .attr('text-anchor', 'middle')
+            .attr('alignment-baseline', 'central')
+            .attr('fill', 'white')
+            .attr('font-family', 'Arial')
+            .attr('font-size', '10px')
+            .text(node.data.name);
+
+          ui.append(n);
+          ui.append(svgText);
+            // .link('http://localhost:4200/assets/project.png')
+
+          return ui;
+        }
+      })
+      // .link(function(link) {
+      //   return Viva.Graph.View.webglLine(colors[(Math.random() * colors.length) << 0]);
+      // })
+      .placeNode(function(nodeUI, pos){
+        // Shift image to let links go to the center:
+        if(nodeUI.attr('label') === 'person') {
+          nodeUI.attr('x', pos.x - 12).attr('y', pos.y - 12);
+        } else {
+          // console.log(nodeUI);
+          // nodeUI.attr('x', 500);
+          // console.log(pos);
+          // nodeUI.attr('x', pos.x - labelWidth / 2).attr('y', pos.y - labelHeight / 2);
+          nodeUI.attr('transform',
+            'translate(' +
+            (pos.x - labelWidth/2) + ',' + (pos.y - labelHeight/2) +
+            ')');
+        }
+      })
+    ;
+
+    var renderer = Viva.Graph.View.renderer(graph, {
+      // layout: layout,
+      graphics: graphics,
+      container: document.getElementById('graph-container')
+    });
+    var multiSelectOverlay;
+
+    renderer.run();
+
+    document.addEventListener('keydown', function(e) {
+      if (e.which === 16 && !multiSelectOverlay) { // shift key
+        multiSelectOverlay = startMultiSelect(graph, renderer, layout);
+      }
+    });
+    document.addEventListener('keyup', function(e) {
+      if (e.which === 16 && multiSelectOverlay) {
+        multiSelectOverlay.destroy();
+        multiSelectOverlay = null;
+      }
+    });
+  }
+
+  function startMultiSelect(graph, renderer, layout) {
+    var graphics = renderer.getGraphics();
+    var domOverlay = document.querySelector('.graph-overlay');
+    var overlay = createOverlay(domOverlay);
+    overlay.onAreaSelected(handleAreaSelected);
+
+    return overlay;
+
+    function handleAreaSelected(area) {
+      // For the sake of this demo we are using silly O(n) implementation.
+      // Could be improved with spatial indexing if required.
+      var topLeft = graphics.transformClientToGraphCoordinates({
+        x: area.x,
+        y: area.y
+      });
+
+      var bottomRight = graphics.transformClientToGraphCoordinates({
+        x: area.x + area.width,
+        y: area.y + area.height
+      });
+
+      graph.forEachNode(higlightIfInside);
+      renderer.rerender();
+
+      return;
+
+      function higlightIfInside(node) {
+        var nodeUI = graphics.getNodeUI(node.id);
+        if (isInside(node.id, topLeft, bottomRight)) {
+          nodeUI.color = 0xFFA500ff;
+          nodeUI.size = 20;
+        } else {
+          nodeUI.color = 0x009ee8ff;
+          nodeUI.size = 10;
+        }
+      }
+
+      function isInside(nodeId, topLeft, bottomRight) {
+        var nodePos = layout.getNodePosition(nodeId);
+        return (topLeft.x < nodePos.x && nodePos.x < bottomRight.x &&
+          topLeft.y < nodePos.y && nodePos.y < bottomRight.y);
+      }
+    }
+  }
+
+  function createOverlay(overlayDom) {
+    var selectionClasName = 'graph-selection-indicator';
+    var selectionIndicator = overlayDom.querySelector('.' + selectionClasName);
+    if (!selectionIndicator) {
+      selectionIndicator = document.createElement('div');
+      selectionIndicator.className = selectionClasName;
+      overlayDom.appendChild(selectionIndicator);
+    }
+
+    var notify = [];
+    var dragndrop = Viva.Graph.Utils.dragndrop(overlayDom);
+    var selectedArea = {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    };
+    var startX = 0;
+    var startY = 0;
+
+    dragndrop.onStart(function(e) {
+      startX = selectedArea.x = e.clientX;
+      startY = selectedArea.y = e.clientY;
+      selectedArea.width = selectedArea.height = 0;
+
+      updateSelectedAreaIndicator();
+      selectionIndicator.style.display = 'block';
+    });
+
+    dragndrop.onDrag(function(e) {
+      recalculateSelectedArea(e);
+      updateSelectedAreaIndicator();
+      notifyAreaSelected();
+    });
+
+    dragndrop.onStop(function() {
+      selectionIndicator.style.display = 'none';
+    });
+
+    overlayDom.style.display = 'block';
+
+    return {
+      onAreaSelected: function(cb) {
+        notify.push(cb);
+      },
+      destroy: function () {
+        overlayDom.style.display = 'none';
+        dragndrop.release();
+      }
+    };
+
+    function notifyAreaSelected() {
+      notify.forEach(function(cb) {
+        cb(selectedArea);
+      });
+    }
+
+    function recalculateSelectedArea(e) {
+      selectedArea.width = Math.abs(e.clientX - startX);
+      selectedArea.height = Math.abs(e.clientY - startY);
+      selectedArea.x = Math.min(e.clientX, startX);
+      selectedArea.y = Math.min(e.clientY, startY);
+    }
+
+    function updateSelectedAreaIndicator() {
+      selectionIndicator.style.left = selectedArea.x + 'px';
+      selectionIndicator.style.top = selectedArea.y + 'px';
+      selectionIndicator.style.width = selectedArea.width + 'px';
+      selectionIndicator.style.height = selectedArea.height + 'px';
+    }
+  }
+
+  window.onload = showGraph1;
+</script>
+</body>
+</html>
